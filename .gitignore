@@ -1,0 +1,4 @@
+backend/uploads/
+backend/venv/
+backend/.env
+node_modules/
