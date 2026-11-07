@@ -63,7 +63,16 @@ def me(user=Depends(current_user)):
 def admin_ping(user=Depends(require_roles("admin"))):
     return {"ok": True, "role": user["role"]}
 
-
+@app.get("/debug-dist")
+def debug_dist():
+    d = os.path.abspath(DIST)
+    root = os.path.abspath(os.path.join(d, "..", ".."))
+    return {
+        "dist_path": d,
+        "dist_exists": os.path.isdir(d),
+        "assets_exists": os.path.isdir(os.path.join(d, "assets")),
+        "repo_root_contents": os.listdir(root) if os.path.isdir(root) else "root missing",
+    }
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist")
 if os.path.isdir(os.path.join(DIST, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST, "assets")), name="assets")
