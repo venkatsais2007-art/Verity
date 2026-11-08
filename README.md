@@ -5,7 +5,7 @@ approved guidelines, facts, terminology and assets, explains every issue, sugges
 and requires human approval before anything is published.
 
 ## Demo
-Live site: PASTE-RENDER-LINK-HERE (free hosting, first load can take about 1 minute)
+Live site: https://verity-1-pxq8.onrender.com/login(free hosting, first load can take about 1 minute)
 Code: https://github.com/venkatsais2007-art/verity
 Company ID: NORTHWIND, password for all users: demo123
 Employee IDs: admin01, creator01, creator02, creator03, manager01, reviewer01
