@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Layout from "../components/Layout";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
 
 const CAT_COLOR = {

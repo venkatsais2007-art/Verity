@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
 
 const inputClass =
@@ -28,6 +28,8 @@ const ACTION = {
   changes_requested: "Changes requested",
   rejected: "Rejected",
   published: "Published",
+  brand_logo_uploaded: "Approved logo uploaded",
+  brand_logo_removed: "Approved logo removed",
 };
 
 const DOT = {
@@ -142,7 +144,10 @@ export default function ReviewPanel({ submission, findings, reload }) {
   }, [sid, submission.status, submission.current_version]);
 
   async function addComment() {
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      setError("Please write a comment before posting.");
+      return;
+    }
     setError("");
     try {
       await api(`/submissions/${sid}/comments`, { method: "POST", token, body: { body: text } });
@@ -288,7 +293,7 @@ export default function ReviewPanel({ submission, findings, reload }) {
             className={inputClass}
             placeholder="Write a comment..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); if (error) setError(""); }}
             onKeyDown={(e) => e.key === "Enter" && addComment()}
           />
           <button

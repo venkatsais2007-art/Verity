@@ -1,16 +1,19 @@
-import os, re, uuid
+import os, re, uuid, logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
 from db import get_conn
 from auth import current_user, require_roles
 from extract import extract_text
+from file_validation import validate_image
 from review import run_review
 
 router = APIRouter(prefix="/api/submissions", tags=["submissions"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+# Set UPLOAD_DIR to a persistent path (e.g. a Render Disk mount) in production.
+UPLOAD_DIR = os.getenv("UPLOAD_DIR") or os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+log = logging.getLogger("verity.submissions")
 
 CHANNELS = {"social", "ad", "email", "web"}
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp")
@@ -54,45 +57,63 @@ async def create_submission(
 
     file_name, file_type = None, "text"
     if file is not None and file.filename:
-        data = await file.read()
+        data = await file.read(MAX_UPLOAD + 1)
         if len(data) > MAX_UPLOAD:
             raise HTTPException(400, "File too large (max 5 MB)")
-        lower = file.filename.lower()
-        if lower.endswith(IMAGE_EXT):
+        extension = os.path.splitext(file.filename)[1].lower()
+        if extension in IMAGE_EXT:
             file_type = "image"
-        elif lower.endswith(DOC_EXT):
+            try:
+                validate_image(data, file.filename)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        elif extension in DOC_EXT or extension == ".txt":
             file_type = "document"
             try:
                 text = extract_text(file.filename, data)
-            except Exception:
-                raise HTTPException(400, "Could not read this document")
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            except Exception as exc:
+                log.exception("Unexpected document extraction error")
+                raise HTTPException(400, "Could not safely read this document") from exc
             if not text:
                 raise HTTPException(400, "No readable text found in this document")
             content = text
         else:
-            raise HTTPException(400, "Unsupported file. Use PNG, JPG, WEBP, PDF or DOCX.")
-        safe = re.sub(r"[^A-Za-z0-9._-]", "_", file.filename)
+            raise HTTPException(400, "Unsupported file. Use PNG, JPG, WEBP, PDF, DOCX, or TXT.")
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(file.filename))[:120]
         file_name = f"{uuid.uuid4().hex}_{safe}"
-        with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
-            f.write(data)
 
     if file_type == "text" and not content:
         raise HTTPException(400, "Add some text or upload a file")
 
-    conn = get_conn()
+    saved_path = None
     try:
-        cur = conn.execute(
-            "INSERT INTO submissions (company_id, creator_id, title, channel, purpose, status) "
-            "VALUES (?,?,?,?,?, 'draft')",
-            (user["company_id"], user["id"], title, channel, purpose))
-        sid = cur.lastrowid
-        conn.execute(
-            "INSERT INTO submission_versions (submission_id, version, content, file_name, file_type) "
-            "VALUES (?,?,?,?,?)", (sid, 1, content, file_name, file_type))
-        audit(conn, user, sid, "submission_created", f"{title} ({channel}, {file_type})")
-        conn.commit()
-    finally:
-        conn.close()
+        if file_name:
+            saved_path = os.path.join(UPLOAD_DIR, file_name)
+            with open(saved_path, "xb") as f:
+                f.write(data)
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "INSERT INTO submissions (company_id, creator_id, title, channel, purpose, status) "
+                "VALUES (?,?,?,?,?, 'draft')",
+                (user["company_id"], user["id"], title, channel, purpose))
+            sid = cur.lastrowid
+            conn.execute(
+                "INSERT INTO submission_versions (submission_id, version, content, file_name, file_type) "
+                "VALUES (?,?,?,?,?)", (sid, 1, content, file_name, file_type))
+            audit(conn, user, sid, "submission_created", f"{title} ({channel}, {file_type})")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        if saved_path and os.path.exists(saved_path):
+            try:
+                os.remove(saved_path)
+            except OSError:
+                log.exception("Could not remove an orphaned upload after a failed submission")
+        raise
     return {"id": sid}
 
 

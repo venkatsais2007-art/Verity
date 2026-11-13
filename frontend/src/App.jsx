@@ -4,7 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import NewSubmission from "./pages/NewSubmission";
 import SubmissionDetail from "./pages/SubmissionDetail";
-import Insights from "./pages/Insights";
+import Insights from "./pages/insights";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {

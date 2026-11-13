@@ -1,7 +1,7 @@
-import sqlite3
+from db import get_conn, init_db
 
-conn = sqlite3.connect("verity.db")
-conn.row_factory = sqlite3.Row
+init_db()
+conn = get_conn()
 WEIGHTS = {"high": 15, "medium": 8, "low": 3}
 
 T = {

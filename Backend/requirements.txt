@@ -5,4 +5,7 @@ PyJWT
 pypdf
 python-docx
 python-multipart
+opencv-python-headless
+Pillow
 google-genai
+psycopg[binary,pool]

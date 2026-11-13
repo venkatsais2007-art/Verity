@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Layout from "../components/Layout";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
 
 const KINDS = [
@@ -28,10 +28,18 @@ export default function KnowledgeBase() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null);
   const [history, setHistory] = useState(null);
+  const [logos, setLogos] = useState([]);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoBusy, setLogoBusy] = useState(false);
 
   async function load() {
     try {
-      setItems(await api("/kb", { token }));
+      const [knowledge, approvedLogos] = await Promise.all([
+        api("/kb", { token }),
+        api("/visual/logos", { token }),
+      ]);
+      setItems(knowledge);
+      setLogos(approvedLogos);
     } catch (e) {
       setError(e.message);
     }
@@ -113,6 +121,42 @@ export default function KnowledgeBase() {
     }
   }
 
+  async function uploadLogo(e) {
+    e.preventDefault();
+    if (!logoFile) return;
+    setError("");
+    setLogoBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", logoFile);
+      await api("/visual/logos", { method: "POST", token, body: form });
+      setLogoFile(null);
+      e.target.reset();
+      flash("Approved logo added");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  async function removeLogo(logo) {
+    if (!confirm(`Remove ${logo.original_name} from approved logos?`)) return;
+    try {
+      await api(`/visual/logos/${logo.id}`, { method: "DELETE", token });
+      flash("Approved logo removed");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  const palette = [...new Set(
+    items.filter((item) => item.kind === "asset")
+      .flatMap((item) => [...item.content.matchAll(/#[0-9a-fA-F]{6}\b/g)].map((match) => match[0].toUpperCase()))
+  )];
+
   return (
     <Layout>
       <h1 className="text-2xl font-bold text-slate-900">Brand knowledge base</h1>
@@ -122,6 +166,55 @@ export default function KnowledgeBase() {
 
       {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="font-semibold text-slate-900">Approved logos</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Logo files are used for visual template matching. Upload official image files; each company has its own approved set.
+        </p>
+        <form onSubmit={uploadLogo} className="mt-4 flex flex-wrap items-center gap-3">
+          <input
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp"
+            required
+            onChange={(e) => setLogoFile(e.target.files[0] || null)}
+            className="block min-w-0 flex-1 text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:font-medium file:text-indigo-700"
+          />
+          <button disabled={logoBusy || !logoFile}
+                  className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">
+            {logoBusy ? "Uploading..." : "Add approved logo"}
+          </button>
+        </form>
+        {logos.length === 0 ? (
+          <p className="mt-3 text-sm text-amber-700">No approved logos yet. Logo presence and version checks will remain unconfigured until one is added.</p>
+        ) : (
+          <ul className="mt-4 divide-y divide-slate-100">
+            {logos.map((logo) => (
+              <li key={logo.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="text-slate-700">{logo.original_name} <span className="text-xs text-slate-400">{logo.width} × {logo.height}</span></span>
+                <button onClick={() => removeLogo(logo)} className="text-red-600 hover:underline">Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="font-semibold text-slate-900">Approved brand colours</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Palette values are read from active Asset entries in the knowledge base and used by image analysis.
+        </p>
+        {palette.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {palette.map((color) => (
+              <span key={color} className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700">
+                <span className="h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: color }} />
+                {color}
+              </span>
+            ))}
+          </div>
+        ) : <p className="mt-3 text-sm text-amber-700">No hex colour values found in active Asset entries; colour deviations cannot be checked.</p>}
+      </section>
 
       <form onSubmit={add} className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex gap-2 text-sm">

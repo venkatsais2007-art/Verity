@@ -1,15 +1,17 @@
 
 import os, json, base64, sqlite3
+import logging
 from db import get_conn
 from rules import rule_findings
 
 PROVIDER = os.getenv("REVIEW_PROVIDER", "gemini")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 AI_TIMEOUT = int(os.getenv("REVIEW_AI_TIMEOUT", "45"))
 MODEL_LABEL = {"gemini": GEMINI_MODEL, "claude": CLAUDE_MODEL}.get(PROVIDER, "built-in rules")
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR") or os.path.join(os.path.dirname(__file__), "uploads")
+log = logging.getLogger("verity.review")
 WEIGHTS = {"high": 15, "medium": 8, "low": 3}
 CATEGORIES = ["tone", "terminology", "messaging", "claims", "outdated_facts", "visual", "accessibility"]
 
@@ -52,14 +54,8 @@ Rules:
 
 
 def ensure_columns():
-    conn = get_conn()
-    for col in ("review_progress TEXT", "review_error TEXT"):
-        try:
-            conn.execute(f"ALTER TABLE submissions ADD COLUMN {col}")
-        except sqlite3.OperationalError:
-            pass
-    conn.commit()
-    conn.close()
+    from db import ensure_review_columns
+    ensure_review_columns()
 
 
 def set_progress(conn, sid, text):
@@ -93,7 +89,7 @@ def call_gemini(sub, ver, kb):
 
     text, image, mime = build_input(sub, ver, kb)
     client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"],
+        api_key=os.environ["GEMINI_API_KEY"].strip(),
         http_options=types.HttpOptions(timeout=AI_TIMEOUT * 1000),
     )
     parts = []
@@ -166,6 +162,29 @@ def merge(rule_list, ai_list):
     return merged
 
 
+def validate_ai_findings(items):
+    if not isinstance(items, list):
+        raise ValueError("AI response findings must be a list.")
+    validated = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("AI response contains an invalid finding.")
+        severity = item.get("severity")
+        category = item.get("category")
+        if severity not in WEIGHTS or category not in CATEGORIES:
+            raise ValueError("AI response contains an unsupported finding type.")
+        finding = {}
+        for key in ("flagged_text", "reason", "source_ref", "suggestion"):
+            value = item.get(key)
+            if not isinstance(value, str):
+                raise ValueError("AI response contains an invalid finding field.")
+            finding[key] = value
+        finding["severity"] = severity
+        finding["category"] = category
+        validated.append(finding)
+    return validated
+
+
 def run_review(sid, version):
     conn = get_conn()
     try:
@@ -185,13 +204,22 @@ def run_review(sid, version):
         if PROVIDER in ("gemini", "claude"):
             set_progress(conn, sid, f"Analysing content with AI (waits up to {AI_TIMEOUT} seconds)...")
             try:
-                ai = call_gemini(sub, ver, kb) if PROVIDER == "gemini" else call_claude(sub, ver, kb)
-            except Exception as e:
+                response = call_gemini(sub, ver, kb) if PROVIDER == "gemini" else call_claude(sub, ver, kb)
+                ai = validate_ai_findings(response)
+            except Exception:
+                log.exception("AI provider failed; completing review with built-in rules only")
                 ai = []
-                note = ("Note: the AI service did not respond in time, so only the built-in rule checks ran. "
-                        "Reason: " + str(e)[:120])
+                note = "Note: AI analysis was unavailable, so only the built-in rule checks ran."
         else:
             note = "Note: AI analysis is switched off, so only the built-in rule checks ran."
+
+        if ver["file_type"] == "image":
+            set_progress(conn, sid, "Running separate visual brand checks...")
+            try:
+                from visual_analysis import run_visual_analysis
+                run_visual_analysis(sid, version)
+            except Exception as e:
+                log.exception("Visual analysis failed for submission %s version %s", sid, version)
 
         findings = merge(rules, ai)
 
@@ -233,9 +261,10 @@ def run_review(sid, version):
             (sub["company_id"], sid, None, "ai_review_completed",
              f"v{version}: {len(findings)} findings, score {score}, {how}"))
         conn.commit()
-    except Exception as e:
+    except Exception:
+        log.exception("Review failed for submission %s version %s", sid, version)
         conn.rollback()
-        msg = f"Review failed: {str(e)[:200]}"
+        msg = "Review could not be completed. Please retry or contact an administrator."
         conn.execute(
             "UPDATE submissions SET status='draft', review_progress=NULL, review_error=?, "
             "updated_at=datetime('now') WHERE id=?", (msg, sid))

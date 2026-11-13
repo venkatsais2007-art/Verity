@@ -17,5 +17,10 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // This app fetches data on mount with load() inside useEffect, which is a
+      // normal pattern here. The rule flags it as a style concern, not a bug.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

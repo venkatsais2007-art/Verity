@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
+import { setDirty } from "../dirty";
 
 const CHANNELS = [
   { value: "social", label: "Social post" },
@@ -26,7 +27,20 @@ export default function NewSubmission() {
   const [busy, setBusy] = useState(false);
 
   const isImage = file && /\.(png|jpe?g|webp)$/i.test(file.name);
-  const isDoc = file && /\.(pdf|docx)$/i.test(file.name);
+  const isDoc = file && /\.(pdf|docx|txt)$/i.test(file.name);
+
+  const hasDraft = Boolean(title.trim() || purpose.trim() || content.trim() || file);
+  useEffect(() => {
+    setDirty(hasDraft);
+    const onUnload = (e) => {
+      if (hasDraft) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      setDirty(false);
+    };
+  }, [hasDraft]);
 
   async function submit(e) {
     e.preventDefault();
@@ -40,6 +54,7 @@ export default function NewSubmission() {
       form.append("content", content);
       if (file) form.append("file", file);
       const r = await api("/submissions", { method: "POST", token, body: form });
+      setDirty(false);
       navigate(`/submissions/${r.id}`);
     } catch (err) {
       setError(err.message);
@@ -52,7 +67,7 @@ export default function NewSubmission() {
     <Layout>
       <h1 className="text-2xl font-bold text-slate-900">New submission</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Submit text, an image, or a document (PDF/DOCX). Nothing is published without human approval.
+        Submit text, an image, or a document (PDF/DOCX/TXT). Nothing is published without human approval.
       </p>
 
       <form onSubmit={submit} className="mt-6 max-w-3xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -83,7 +98,7 @@ export default function NewSubmission() {
           <label className="mb-1 block text-xs font-medium text-slate-600">
             Attach an image or document (optional)
           </label>
-          <input type="file" accept=".png,.jpg,.jpeg,.webp,.pdf,.docx"
+          <input type="file" accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt"
                  className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:font-medium file:text-indigo-700"
                  onChange={(e) => setFile(e.target.files[0] || null)} />
         </div>

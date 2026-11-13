@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from db import get_conn
@@ -5,6 +6,7 @@ from auth import current_user, require_roles
 from extract import extract_text
 
 router = APIRouter(prefix="/api/kb", tags=["knowledge base"])
+log = logging.getLogger("verity.kb")
 
 KINDS = {"guideline", "fact", "term", "tone", "asset"}
 MAX_UPLOAD = 5 * 1024 * 1024
@@ -77,15 +79,16 @@ def add_item(body: ItemIn, user=Depends(require_roles("admin"))):
 @router.post("/upload")
 async def upload_item(kind: str = Form(...), title: str = Form(...),
                       file: UploadFile = File(...), user=Depends(require_roles("admin"))):
-    data = await file.read()
+    data = await file.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(400, "File too large (max 5 MB)")
     try:
         text = extract_text(file.filename, data)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     except Exception:
-        raise HTTPException(400, "Could not read this file")
+        log.exception("Unexpected knowledge-base document extraction error")
+        raise HTTPException(400, "Could not safely read this file")
     if not text:
         raise HTTPException(400, "No readable text found in this file")
     conn = get_conn()

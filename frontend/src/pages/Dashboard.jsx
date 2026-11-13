@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Layout from "../components/Layout";
-import StatusBadge, { STATUS } from "../components/StatusBadge";
-import { useAuth } from "../AuthContext";
+import StatusBadge from "../components/StatusBadge";
+import { STATUS } from "../statusConfig";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
 
 const TITLES = {

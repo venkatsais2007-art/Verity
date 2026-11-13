@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Layout from "../components/Layout";
-import StatusBadge, { PIPELINE, STATUS } from "../components/StatusBadge";
+import StatusBadge from "../components/StatusBadge";
+import { PIPELINE, STATUS } from "../statusConfig";
 import ReviewPanel from "../components/ReviewPanel";
-import { useAuth } from "../AuthContext";
+import VisualAnalysisPanel from "../components/VisualAnalysisPanel";
+import { useAuth } from "../useAuth";
 import { api } from "../api";
+import { setDirty } from "../dirty";
 
 const SEV = {
   high: "bg-red-100 text-red-700",
@@ -100,6 +103,7 @@ export default function SubmissionDetail() {
   const [note, setNote] = useState("");
   const imageLoaded = useRef(false);
   const editorRef = useRef(null);
+  const errorRef = useRef(null);
 
   async function load() {
     try {
@@ -138,6 +142,24 @@ export default function SubmissionDetail() {
   useEffect(() => {
     if (data) setDraft(data.versions[0].content || "");
   }, [currentVersion]);
+
+  const draftDirty = Boolean(data) && data.submission.status === "needs_changes" && draft !== (data.versions[0].content || "");
+  useEffect(() => {
+    setDirty(draftDirty);
+    const onUnload = (e) => {
+      if (draftDirty) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      setDirty(false);
+    };
+  }, [draftDirty]);
+
+  // Bring the error banner into view wherever the user is on the page.
+  useEffect(() => {
+    if (error && errorRef.current) errorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [error]);
 
   async function sendForReview() {
     setBusy(true);
@@ -281,7 +303,6 @@ export default function SubmissionDetail() {
         ))}
       </div>
 
-      {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {s.review_error && (
         <p
           className={`mt-4 rounded-lg px-3 py-2 text-sm ${
@@ -290,6 +311,17 @@ export default function SubmissionDetail() {
         >
           {s.review_error}
         </p>
+      )}
+
+      {error && (
+        <div
+          ref={errorRef}
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-lg"
+        >
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError("")} className="font-bold text-red-500 hover:text-red-700" aria-label="Dismiss error">×</button>
+        </div>
       )}
 
       {s.status === "ai_review" && (
@@ -341,6 +373,16 @@ export default function SubmissionDetail() {
         )}
       </div>
 
+      {v.file_type === "image" && (
+        <VisualAnalysisPanel
+          submissionId={id}
+          version={s.current_version}
+          reviewStatus={s.status}
+          imageUrl={imageUrl}
+          textFindingCount={findings.length}
+        />
+      )}
+
       <ReviewPanel submission={s} findings={findings} reload={load} />
 
       {canSend && (
@@ -353,8 +395,10 @@ export default function SubmissionDetail() {
             {busy ? "Sending..." : "Send for AI review"}
           </button>
           <p className="mt-2 text-xs text-slate-400">
-            AI disclosure: built-in brand rules check your content first. When enabled, the content is also sent to
-            an external AI service (Google Gemini) for deeper analysis. A human makes the final decision.
+            AI disclosure: built-in brand rules check your content first. Text review uses the configured AI provider
+            when enabled. Visual text-contrast and guideline observations use Google Gemini; when enabled, your image
+            is sent to Gemini for these approximate checks. Those estimates are labeled; images are never modified and
+            human approval remains required.
           </p>
         </div>
       )}

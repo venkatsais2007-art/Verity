@@ -70,8 +70,11 @@ def approval(sid: int, body: ApprovalIn, user=Depends(require_roles("manager", "
             "request_changes": ("needs_changes", "changes_requested", "request_changes"),
             "reject": ("rejected", "rejected", "rejection"),
         }[action]
-        conn.execute(
-            "UPDATE submissions SET status=?, updated_at=datetime('now') WHERE id=?", (new_status, sid))
+        update = conn.execute(
+            "UPDATE submissions SET status=?, updated_at=datetime('now') "
+            "WHERE id=? AND status='in_human_review'", (new_status, sid))
+        if update.rowcount != 1:
+            raise HTTPException(409, "This submission has already been reviewed")
         if comment:
             conn.execute(
                 "INSERT INTO comments (submission_id, user_id, body, kind) VALUES (?,?,?,?)",
@@ -95,8 +98,11 @@ def publish(sid: int, user=Depends(require_roles("manager", "reviewer"))):
             (sid,)).fetchone()
         if not human:
             raise HTTPException(400, "No human approval is on record for this content")
-        conn.execute(
-            "UPDATE submissions SET status='published', updated_at=datetime('now') WHERE id=?", (sid,))
+        update = conn.execute(
+            "UPDATE submissions SET status='published', updated_at=datetime('now') "
+            "WHERE id=? AND status='approved'", (sid,))
+        if update.rowcount != 1:
+            raise HTTPException(409, "This submission is no longer awaiting publication")
         audit(conn, user, sid, "published", f"Published by {user['name']} ({user['role']})")
         conn.commit()
     finally:

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../useAuth";
 
 const ROLES = [
   { role: "admin", label: "Admin", desc: "Knowledge base & users", emp: "admin01", icon: "🛡️" },
@@ -74,7 +74,7 @@ export default function Login() {
           </ul>
         </div>
         <p className="text-sm text-indigo-200">
-          AI-assisted review powered by Claude. Humans make the final call.
+          AI-assisted review. Humans make the final call.
         </p>
       </div>
 
